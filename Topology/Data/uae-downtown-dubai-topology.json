@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-11-09T11:03:22.468523+00:00",
+  "district": {
+    "id": "downtown-dubai-uae",
+    "name": "Downtown Dubai",
+    "country": "UAE"
+  },
+  "intersections": [],
+  "roads": [],
+  "lights": [],
+  "detectors": [],
+  "generators": [],
+  "absorbers": [],
+  "metadata": {
+    "source": "scaffold",
+    "note": "Replace with GeoPandas/OSM extraction in Sprint 1 implementation."
+  }
+}

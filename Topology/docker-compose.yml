@@ -1,0 +1,36 @@
+name: atcs
+
+services:
+  topology-extractor:
+    build:
+      context: ..
+      dockerfile: Topology/Extractor/Dockerfile
+    image: atcs-topology-extractor:dev
+    container_name: atcs-topology-extractor
+    ports:
+      - "8010:8010"
+    environment:
+      ATCS_TOPOLOGY_DATA_DIR: /app/Topology/Data
+    volumes:
+      - ../Topology/Data:/app/Topology/Data
+    restart: unless-stopped
+
+  topology-viewer:
+    build:
+      context: ..
+      dockerfile: Topology/Viewer/Dockerfile
+    image: atcs-topology-viewer:dev
+    container_name: atcs-topology-viewer
+    depends_on:
+      - topology-extractor
+    ports:
+      - "8011:8011"
+    environment:
+      ATCS_EXTRACTOR_URL: http://topology-extractor:8010
+      ATCS_DEFAULT_COUNTRY: United Arab Emirates
+      ATCS_DEFAULT_CITY: Dubai
+      ATCS_DEFAULT_DISTRICT: Downtown Dubai
+      ATCS_TOPOLOGY_DATA_DIR: /app/Topology/Data
+    volumes:
+      - ../Topology/Data:/app/Topology/Data
+    restart: unless-stopped

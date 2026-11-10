@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ATCS Topology Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <style>
+    :root { --bg:#0b1020; --panel:#141c2f; --line:#26314f; --text:#e8eefc; --muted:#98a6c7; --accent:#5aa9ff; --warn:#ffcc66; --ok:#66d9a3; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:14px/1.4 system-ui, sans-serif; color:var(--text); background:linear-gradient(180deg,#09101d,#0b1020); }
+    header { padding:12px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+    header h1 { font-size:16px; margin:0; }
+    header .status { color:var(--muted); font-size:12px; }
+    .layout { display:grid; grid-template-columns:280px 1fr 320px; height:calc(100vh - 49px); }
+    .panel { border-right:1px solid var(--line); background:var(--panel); overflow:auto; }
+    .panel.right { border-right:0; border-left:1px solid var(--line); }
+    .section { padding:12px; border-bottom:1px solid var(--line); }
+    label { display:block; color:var(--muted); font-size:12px; margin:8px 0 4px; }
+    select, button, input { width:100%; padding:8px; border-radius:8px; border:1px solid var(--line); background:#0d1528; color:var(--text); }
+    button { cursor:pointer; background:#173056; border-color:#254773; }
+    button:hover { background:#1d3d6b; }
+    .center { position:relative; overflow:hidden; }
+    #map { position:absolute; inset:0; width:100%; height:100%; background:#0a1020; }
+    .overlay { position:absolute; left:12px; right:12px; bottom:12px; max-height:38%; overflow:auto; background:rgba(13,21,40,.92); border:1px solid var(--line); border-radius:12px; padding:10px; backdrop-filter: blur(4px); z-index:1000; }
+    .tabs { display:flex; gap:6px; margin-bottom:8px; }
+    .tab { width:auto; padding:6px 10px; font-size:12px; }
+    .tab.active { background:var(--accent); color:#08111f; border-color:var(--accent); }
+    .list { display:grid; gap:6px; }
+    .item { padding:8px; border:1px solid var(--line); border-radius:8px; cursor:pointer; background:#0f1830; }
+    .item:hover,.item.selected { border-color:var(--accent); }
+    .meta { color:var(--muted); font-size:12px; }
+    pre { white-space:pre-wrap; word-break:break-word; background:#09101d; padding:10px; border-radius:8px; border:1px solid var(--line); margin:8px 0 0; }
+    .row { display:flex; gap:8px; align-items:center; }
+    .pill { padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); font-size:11px; }
+    .leaflet-container { font: inherit; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ATCS Topology Viewer</h1>
+    <div id="status" class="status">Loading defaults…</div>
+  </header>
+  <div class="layout">
+    <aside class="panel">
+      <div class="section">
+        <strong>Location</strong>
+        <label for="country">Country</label>
+        <select id="country"></select>
+        <label for="city">Town / City</label>
+        <select id="city"><option value="">Select country first</option></select>
+        <label for="district">District</label>
+        <select id="district"><option value="">Select city first</option></select>
+        <label for="mode">Extract mode</label>
+        <select id="mode"><option value="geopandas">geopandas (OSM)</option><option value="scaffold">scaffold (fast)</option></select>
+        <div style="margin-top:10px"><button id="load">Load district topology</button></div>
+      </div>
+      <div class="section">
+        <strong>Selection</strong>
+        <div id="selectionSummary" class="meta">Country: United Arab Emirates. Town: Dubai. District: Downtown Dubai.</div>
+      </div>
+      <div class="section">
+        <strong>Counts</strong>
+        <div id="counts" class="meta">No topology loaded.</div>
+      </div>
+    </aside>
+    <main class="center">
+      <div id="map"></div>
+      <div class="overlay">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px"><strong>Foreground entities</strong><span id="entityMeta" class="pill">none</span></div>
+        <div class="tabs">
+          <button class="tab active" data-tab="roads">Roads</button>
+          <button class="tab" data-tab="lights">Lights</button>
+          <button class="tab" data-tab="intersections">Intersections</button>
+        </div>
+        <div id="list" class="list"><div class="meta">Choose a district and load topology.</div></div>
+      </div>
+    </main>
+    <aside class="panel right">
+      <div class="section">
+        <strong>Details</strong>
+        <div id="detailsMeta" class="meta">Click a road, light, or intersection.</div>
+        <pre id="details">{}</pre>
+      </div>
+    </aside>
+  </div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { config:null, topology:null, geojson:null, tab:'roads', selected:null, selectedType:null, map:null, layers:{roads:null,lights:null,intersections:null} };
+const setStatus = (t) => $('status').textContent = t;
+
+function initMap() {
+  if (state.map) return state.map;
+  const map = L.map('map', { zoomControl: true }).setView([25.1972, 55.2744], 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+  state.map = map;
+  return map;
+}
+
+async function api(path, opts={}) {
+  const r = await fetch(path, {headers:{'Content-Type':'application/json'}, ...opts});
+  const t = await r.text();
+  let data; try { data = JSON.parse(t); } catch { data = {raw:t}; }
+  if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data));
+  return data;
+}
+function option(value, label, selected=false) {
+  const o = document.createElement('option'); o.value = value; o.textContent = label; o.selected = selected; return o;
+}
+function districtName(d) { return d.district || d.name || ''; }
+function updateSelectionSummary() {
+  $('selectionSummary').textContent = `Country: ${$('country').value || '—'}. Town/City: ${$('city').value || '—'}. District: ${$('district').value || '—'}.`;
+}
+async function loadCountries() {
+  const cfg = state.config;
+  const res = await api(`/api/countries?query=${encodeURIComponent(cfg.default_country || 'United Arab Emirates')}&limit=10`);
+  const sel = $('country'); sel.innerHTML = '';
+  const items = res.countries?.length ? res.countries : [{country: cfg.default_country || 'United Arab Emirates'}];
+  for (const c of items) sel.append(option(c.country || c.display_name, c.country || c.display_name, (c.country||'').toLowerCase().includes('united arab')));
+  if (![...sel.options].some(o=>o.selected) && sel.options[0]) sel.options[0].selected = true;
+}
+async function loadCities() {
+  const country = $('country').value;
+  const sel = $('city'); sel.innerHTML = '<option value="">Loading…</option>';
+  $('district').innerHTML = '<option value="">Select city first</option>';
+  if (!country) { sel.innerHTML = '<option value="">Select country first</option>'; return; }
+  try {
+    const res = await api(`/api/cities?country=${encodeURIComponent(country)}&query=${encodeURIComponent(state.config.default_city||'Dubai')}&limit=30`);
+    sel.innerHTML = '<option value="">(unset)</option>';
+    const items = res.cities || [];
+    const wantedCity = (state.config.default_city||'Dubai').toLowerCase();
+    for (const c of items) sel.append(option(c.city, `${c.city}${c.state ? ' · '+c.state : ''}`, c.city.toLowerCase()===wantedCity));
+    if (![...sel.options].some(o=>o.selected) && items[0]) sel.value = items.find(c=>c.city.toLowerCase().includes(wantedCity))?.city || items[0].city;
+  } catch (e) { sel.innerHTML = `<option value="${state.config.default_city||'Dubai'}">${state.config.default_city||'Dubai'}</option>`; setStatus('Cities lookup limited: '+e.message); }
+  updateSelectionSummary();
+  await loadDistricts();
+}
+async function loadDistricts() {
+  const country = $('country').value, city = $('city').value;
+  const sel = $('district'); sel.innerHTML = '<option value="">Loading…</option>';
+  if (!country) { sel.innerHTML = '<option value="">(unset)</option>'; return; }
+  const wanted = (state.config.default_district || 'Downtown Dubai').trim();
+  try {
+    const q = wanted || city || '';
+    const res = await api(`/api/districts?country=${encodeURIComponent(country)}&city=${encodeURIComponent(city)}&query=${encodeURIComponent(q)}&limit=100`);
+    const items = res.districts || [];
+    const names = new Set(items.map(d => districtName(d)).filter(Boolean));
+    sel.innerHTML = '<option value="">(unset)</option>';
+    if (wanted && !names.has(wanted)) sel.append(option(wanted, wanted));
+    for (const d of items) { const n = districtName(d); if (n) sel.append(option(n, n, n.toLowerCase()===wanted.toLowerCase())); }
+    if (wanted) sel.value = [...sel.options].find(o => o.value.toLowerCase()===wanted.toLowerCase())?.value || wanted;
+  } catch (e) {
+    sel.innerHTML = '';
+    sel.append(option('', '(unset)'));
+    if (wanted) sel.append(option(wanted, wanted, true));
+    setStatus('District lookup limited: '+e.message);
+  }
+  updateSelectionSummary();
+}
+function featureBounds(features) {
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity, ok=false;
+  const scan = (coords) => {
+    if (!coords) return;
+    if (typeof coords[0] === 'number') { const [x,y]=coords; if (isFinite(x)&&isFinite(y)){minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);ok=true;} return; }
+    for (const c of coords) scan(c);
+  };
+  for (const f of features||[]) scan(f.geometry?.coordinates);
+  if (!ok) return null;
+  return [[minY, minX], [maxY, maxX]];
+}
+function renderMap() {
+  const map = initMap();
+  Object.values(state.layers).forEach(l => { if (l) map.removeLayer(l); });
+  state.layers = {roads:null, lights:null, intersections:null};
+  const gj = state.geojson || {};
+  const roads = gj.roads?.features || [];
+  const lights = gj.lights?.features || [];
+  const ints = gj.intersections?.features || (state.topology?.intersections||[]).map(i=>({type:'Feature',geometry:{type:'Point',coordinates:[i.x,i.y]},properties:{id:i.id,name:i.name,...i}}));
+  const all = [...roads, ...ints, ...lights];
+  const bounds = featureBounds(all);
+
+  state.layers.roads = L.geoJSON({type:'FeatureCollection', features:roads}, {
+    style: (f) => {
+      const id = f.properties?.id || f.properties?.osmid;
+      const sel = state.selectedType==='roads' && String(state.selected?.id||state.selected?.properties?.osmid||'')===String(id);
+      return { color: sel ? '#66d9a3' : '#4da3ff', weight: sel ? 5 : 3, opacity: 0.9 };
+    },
+    onEachFeature: (f, layer) => layer.on('click', () => {
+      const id = f.properties?.id || f.properties?.osmid;
+      select('roads', findTopology('roads', id) || {id, properties:f.properties, geometry:f.geometry});
+    })
+  }).addTo(map);
+
+  state.layers.intersections = L.geoJSON({type:'FeatureCollection', features:ints}, {
+    pointToLayer: (f, latlng) => {
+      const id = f.properties?.id || f.properties?.osmid;
+      const sel = state.selectedType==='intersections' && String(state.selected?.id||state.selected?.properties?.osmid||'')===String(id);
+      return L.circleMarker(latlng, {radius: sel?8:5, color:'#08111f', weight:1, fillColor: sel?'#ffcc66':'#7fd1ff', fillOpacity:0.95});
+    },
+    onEachFeature: (f, layer) => layer.on('click', () => {
+      const id = f.properties?.id || f.properties?.osmid;
+      select('intersections', findTopology('intersections', id) || {id, properties:f.properties, geometry:f.geometry, ...f.properties});
+    })
+  }).addTo(map);
+
+  state.layers.lights = L.geoJSON({type:'FeatureCollection', features:lights}, {
+    pointToLayer: (f, latlng) => {
+      const id = f.properties?.id || f.properties?.osmid;
+      const sel = state.selectedType==='lights' && String(state.selected?.id||state.selected?.properties?.osmid||'')===String(id);
+      return L.circleMarker(latlng, {radius: sel?9:6, color:'#3b2a00', weight:1, fillColor: sel?'#ff7a7a':'#ffcc66', fillOpacity:1});
+    },
+    onEachFeature: (f, layer) => layer.on('click', () => {
+      const id = f.properties?.id || f.properties?.osmid;
+      select('lights', findTopology('lights', id) || {id, properties:f.properties, geometry:f.geometry, ...f.properties});
+    })
+  }).addTo(map);
+
+  if (bounds) map.fitBounds(bounds, {padding:[20,20]});
+  else if (!all.length) map.setView([25.1972, 55.2744], 14);
+  setTimeout(() => map.invalidateSize(), 0);
+}
+function findTopology(type, id) {
+  const items = state.topology?.[type] || [];
+  return items.find(i => String(i.id)===String(id) || String(i.id).includes(String(id)) || String(i.osmid||'')===String(id));
+}
+function select(type, item) {
+  state.selectedType = type; state.selected = item;
+  $('detailsMeta').textContent = `${type.slice(0,-1)} selected`;
+  $('details').textContent = JSON.stringify(item, null, 2);
+  renderMap(); renderList();
+}
+function renderList() {
+  const list = $('list'); list.innerHTML = '';
+  const type = state.tab;
+  const items = state.topology?.[type] || [];
+  $('entityMeta').textContent = `${items.length} ${type}`;
+  if (!items.length) { list.innerHTML = `<div class="meta">No ${type} in loaded topology.</div>`; return; }
+  for (const item of items.slice(0, 300)) {
+    const d = document.createElement('div'); d.className = 'item' + (state.selected===item ? ' selected':'');
+    const label = item.name || item.id || item.osmid || type;
+    const meta = type==='roads' ? `${item.from_intersection_id||''} → ${item.to_intersection_id||''}` : type==='lights' ? `intersection ${item.intersection_id||item.properties?.highway||''}` : `${item.road_ids?.length||0} roads`;
+    d.innerHTML = `<div>${label}</div><div class="meta">${meta}</div>`;
+    d.onclick = () => select(type, item);
+    list.appendChild(d);
+  }
+}
+async function loadTopology() {
+  const country = $('country').value, city = $('city').value, district = $('district').value, mode = $('mode').value;
+  updateSelectionSummary();
+  if (!country || !district) { setStatus('Select country and district first.'); return; }
+  setStatus(`Loading ${district}, ${city}, ${country} (${mode})…`);
+  $('load').disabled = true;
+  try {
+    const payload = {country, city, district, mode, network_type:'drive', write_files:false, include_geojson:true, include_topology:true};
+    const res = await api('/api/extract', {method:'POST', body: JSON.stringify(payload)});
+    state.topology = res.topology || {roads:[],intersections:[],lights:[],district:res.district||{}};
+    state.geojson = res.geojson || {};
+    state.selected = null; state.selectedType = null;
+    $('counts').textContent = `roads=${res.counts?.roads??0}, intersections=${res.counts?.intersections??0}, lights=${res.counts?.lights??0}, detectors=${res.counts?.detectors??0}`;
+    $('detailsMeta').textContent = 'Click a road, light, or intersection.';
+    $('details').textContent = JSON.stringify(res.district || {}, null, 2);
+    renderMap(); renderList();
+    setStatus(`Loaded ${district}. ${res.counts?.roads??0} roads, ${res.counts?.intersections??0} intersections, ${res.counts?.lights??0} lights.`);
+  } catch (e) { setStatus('Load failed: '+e.message); }
+  finally { $('load').disabled = false; }
+}
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => { document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); state.tab=b.dataset.tab; renderList(); });
+$('country').onchange = () => { updateSelectionSummary(); loadCities(); };
+$('city').onchange = () => { updateSelectionSummary(); loadDistricts(); };
+$('district').onchange = updateSelectionSummary;
+$('load').onclick = loadTopology;
+(async function init() {
+  try {
+    state.config = await api('/api/config');
+    await loadCountries();
+    await loadCities();
+    if ($('district').value) {
+      await loadTopology();
+    } else {
+      setStatus(`Ready. Defaults: ${state.config.default_country} / ${state.config.default_city} / ${state.config.default_district || '(unset)'}.`);
+    }
+  } catch (e) { setStatus('Init failed: '+e.message); }
+})();
+</script>
+</body>
+</html>
