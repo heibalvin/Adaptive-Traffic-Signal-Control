@@ -109,12 +109,37 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+_COUNTRY3_ALIASES = {
+    "united-arab-emirates": "uae",
+    "are": "uae",
+    "ae": "uae",
+    "united-states": "usa",
+    "united-states-of-america": "usa",
+    "us": "usa",
+    "united-kingdom": "gbr",
+    "uk": "gbr",
+    "gb": "gbr",
+}
+
+
 def slug(value: str) -> str:
     return "-".join("".join(ch.lower() if ch.isalnum() else " " for ch in value).split())
 
 
+def country_code3(value: str) -> str:
+    s = slug(value)
+    if s in _COUNTRY3_ALIASES:
+        return _COUNTRY3_ALIASES[s]
+    if len(s) == 3 and s.isalpha():
+        return s
+    compact = s.replace("-", "")
+    if len(compact) >= 3 and compact.isalpha():
+        return compact[:3]
+    return s or "unk"
+
+
 def default_output_base(country: str, district: str, out_dir: Path) -> Path:
-    return out_dir / f"{slug(country)}-{slug(district)}-topology"
+    return out_dir / f"{country_code3(country)}-{slug(district)}-topology"
 
 
 def extract_topology(district: str, country: str, district_id: str | None = None) -> Topology:

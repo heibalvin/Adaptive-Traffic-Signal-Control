@@ -51,18 +51,30 @@ def _slug(value: str) -> str:
     return "-".join("".join(ch.lower() if ch.isalnum() else " " for ch in value).split())
 
 
+def _country3(value: str) -> str:
+    s = _slug(str(value or ""))
+    aliases = {"united-arab-emirates": "uae", "are": "uae", "ae": "uae", "united-states": "usa", "us": "usa", "united-kingdom": "gbr", "uk": "gbr", "gb": "gbr"}
+    if s in aliases:
+        return aliases[s]
+    if len(s) == 3 and s.isalpha():
+        return s
+    compact = s.replace("-", "")
+    return compact[:3] if len(compact) >= 3 and compact.isalpha() else s
+
+
 def _static_candidates(payload: dict[str, Any]) -> list[Path]:
-    country = _slug(str(payload.get("country") or ""))
+    country_raw = str(payload.get("country") or "")
+    country_slug = _slug(country_raw)
+    country3 = _country3(country_raw)
     city = _slug(str(payload.get("city") or ""))
     district = _slug(str(payload.get("district") or ""))
     names: list[str] = []
-    if country and city and district:
-        if country == "united-arab-emirates":
-            names.append(f"uae-{city}-{district}-topology.json")
-        names.extend([
-            f"{country}-{city}-{district}-topology.json",
-            f"uae-{city}-{district}-topology.json",
-        ])
+    if city and district:
+        for c in dict.fromkeys([country3, country_slug, "uae" if country_slug == "united-arab-emirates" else ""]):
+            if c:
+                names.append(f"{c}-{city}-{district}-topology.json")
+                if city == district:
+                    names.append(f"{c}-{district}-topology.json")
     out: list[Path] = []
     seen: set[str] = set()
     for base in (DATA_DIR, STATIC_DATA_DIR):

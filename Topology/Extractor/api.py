@@ -124,10 +124,12 @@ def districts(
 @app.post("/extract")
 def extract(req: ExtractRequest) -> dict[str, Any]:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    parts = [p for p in (req.country, req.city, req.district) if p and p.strip()]
-    slug_base = "-".join(p.lower().replace(" ", "-") for p in parts) + "-topology"
-    slug_base = "".join(ch for ch in slug_base if ch.isalnum() or ch in "-_")
-    base = DATA_DIR / slug_base
+    from .atcs_extract import country_code3, slug as _slug
+    country = country_code3(req.country)
+    city = _slug(req.city) if req.city else ""
+    district = _slug(req.district)
+    parts = [p for p in (country, city, district) if p]
+    base = DATA_DIR / ("-".join(parts) + "-topology")
     out_json = base.with_suffix(".json")
     out_image = base.with_suffix(".png")
 

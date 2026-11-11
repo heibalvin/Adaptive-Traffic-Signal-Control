@@ -1,0 +1,1 @@
+"""Shared MQTT topics, messages, and state machine definitions."""

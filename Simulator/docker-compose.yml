@@ -1,0 +1,83 @@
+name: atcs
+
+services:
+  mqtt:
+    image: eclipse-mosquitto:2.1.2-alpine
+    container_name: atcs-simulator-mqtt
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  generator-device:
+    build:
+      context: ..
+      dockerfile: Simulator/Dockerfiles/generator_device.Dockerfile
+    image: atcs-generator-device:dev
+    container_name: atcs-generator-device
+    depends_on:
+      - mqtt
+    environment:
+      DEVICE_ID: ${GENERATOR_DEVICE_ID:-gen-1}
+      DISTRICT_ID: ${DISTRICT_ID:-district-1}
+      INTERSECTION_ID: ${INTERSECTION_ID:-boundary}
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+    command: ["python", "-m", "Simulator.Devices.generator_device", "--device-id", "${GENERATOR_DEVICE_ID:-gen-1}", "--district-id", "${DISTRICT_ID:-district-1}", "--intersection-id", "${INTERSECTION_ID:-boundary}", "--broker-host", "mqtt", "--broker-port", "1883"]
+    restart: unless-stopped
+
+  absorber-device:
+    build:
+      context: ..
+      dockerfile: Simulator/Dockerfiles/absorber_device.Dockerfile
+    image: atcs-absorber-device:dev
+    container_name: atcs-absorber-device
+    depends_on:
+      - mqtt
+    command: ["python", "-m", "Simulator.Devices.absorber_device", "--device-id", "${ABSORBER_DEVICE_ID:-abs-1}", "--district-id", "${DISTRICT_ID:-district-1}", "--intersection-id", "${INTERSECTION_ID:-boundary}", "--broker-host", "mqtt", "--broker-port", "1883"]
+    restart: unless-stopped
+
+  road-device:
+    build:
+      context: ..
+      dockerfile: Simulator/Dockerfiles/road_device.Dockerfile
+    image: atcs-road-device:dev
+    container_name: atcs-road-device
+    depends_on:
+      - mqtt
+    command: ["python", "-m", "Simulator.Devices.road_device", "--device-id", "${ROAD_DEVICE_ID:-road-1}", "--district-id", "${DISTRICT_ID:-district-1}", "--intersection-id", "${INTERSECTION_ID:-segment}", "--broker-host", "mqtt", "--broker-port", "1883"]
+    restart: unless-stopped
+
+  generator-manager:
+    build:
+      context: ..
+      dockerfile: Simulator/Dockerfiles/generator_manager.Dockerfile
+    image: atcs-generator-manager:dev
+    container_name: atcs-generator-manager
+    depends_on:
+      - mqtt
+    command: ["python", "-m", "Simulator.Managers.generator_manager", "--broker-host", "mqtt", "--broker-port", "1883", "--district-id", "${DISTRICT_ID:-+}"]
+    restart: unless-stopped
+
+  absorber-manager:
+    build:
+      context: ..
+      dockerfile: Simulator/Dockerfiles/absorber_manager.Dockerfile
+    image: atcs-absorber-manager:dev
+    container_name: atcs-absorber-manager
+    depends_on:
+      - mqtt
+    command: ["python", "-m", "Simulator.Managers.absorber_manager", "--broker-host", "mqtt", "--broker-port", "1883", "--district-id", "${DISTRICT_ID:-+}"]
+    restart: unless-stopped
+
+  road-manager:
+    build:
+      context: ..
+      dockerfile: Simulator/Dockerfiles/road_manager.Dockerfile
+    image: atcs-road-manager:dev
+    container_name: atcs-road-manager
+    depends_on:
+      - mqtt
+    command: ["python", "-m", "Simulator.Managers.road_manager", "--broker-host", "mqtt", "--broker-port", "1883", "--district-id", "${DISTRICT_ID:-+}"]
+    restart: unless-stopped

@@ -1,0 +1,1 @@
+"""Simulator edge devices (generator, absorber, road)."""
